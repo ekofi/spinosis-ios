@@ -35,22 +35,25 @@ await Spinosis.initialize(
   apiUrl: "https://spinosis.com"
 )
 
+let assignment = await Spinosis.getAssignment(
+  "onboarding_v1",
+  fallback: "control",
+  timeout: 1.5
+)
+
+Text(assignment.headline ?? controlHeadline)
+
+// Or just the key:
 let variant = await Spinosis.getVariant(
   "onboarding_v1",
   fallback: "control",
   timeout: 1.5
 )
 
-if variant == "variant_b" {
-  showNewOnboarding()
-} else {
-  showCurrentOnboarding()
-}
-
 await Spinosis.track("onboarding_completed", properties: ["steps": 5])
 ```
 
-Call `initialize` at launch (for example in `App.init` or `application(_:didFinishLaunchingWithOptions:)`). Call `getVariant` before you pick an onboarding screen.
+Call `initialize` at launch (for example in `App.init` or `application(_:didFinishLaunchingWithOptions:)`). Call `getAssignment` (iOS SDK 1.0.1+) before you pick an onboarding screen so spawned variants can render their headline. `getVariant` still returns only the key.
 
 Anonymous users work if you omit `userId`. An ID is stored in `UserDefaults`.
 

@@ -1,5 +1,29 @@
 import Foundation
 
+public struct SpinosisAssignment {
+  public var variant: String
+  public var payload: [String: Any]
+
+  public init(variant: String, payload: [String: Any] = [:]) {
+    self.variant = variant
+    self.payload = payload
+  }
+
+  public var headline: String? {
+    stringValue("headline")
+  }
+
+  public var subtitle: String? {
+    stringValue("subtitle")
+  }
+
+  private func stringValue(_ key: String) -> String? {
+    guard let value = payload[key] as? String else { return nil }
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.isEmpty ? nil : trimmed
+  }
+}
+
 public enum Spinosis {
   public static func initialize(
     apiKey: String,
@@ -28,7 +52,15 @@ public enum Spinosis {
     fallback: String,
     timeout: TimeInterval? = nil
   ) async -> String {
-    await client.getVariant(experimentKey, fallback: fallback, timeout: timeout)
+    await client.getAssignment(experimentKey, fallback: fallback, timeout: timeout).variant
+  }
+
+  public static func getAssignment(
+    _ experimentKey: String,
+    fallback: String,
+    timeout: TimeInterval? = nil
+  ) async -> SpinosisAssignment {
+    await client.getAssignment(experimentKey, fallback: fallback, timeout: timeout)
   }
 
   public static func track(_ eventName: String, properties: [String: Any]? = nil) async {
@@ -60,6 +92,7 @@ actor SpinosisClient {
 
   private struct CachedAssignment: Codable {
     var variant: String
+    var payloadJSON: Data?
     var cachedAt: TimeInterval
   }
 
@@ -118,8 +151,9 @@ actor SpinosisClient {
     try? await post("/api/sdk/identify", body: identityPayload(), timeout: defaultTimeout)
   }
 
-  func getVariant(_ experimentKey: String, fallback: String, timeout: TimeInterval?) async -> String {
-    guard initialized else { return fallback }
+  func getAssignment(_ experimentKey: String, fallback: String, timeout: TimeInterval?) async -> SpinosisAssignment {
+    let fallbackAssignment = SpinosisAssignment(variant: fallback)
+    guard initialized else { return fallbackAssignment }
     let timeout = timeout ?? defaultTimeout
 
     do {
@@ -129,17 +163,18 @@ actor SpinosisClient {
         timeout: timeout
       )
       if let variant = json["variant"] as? String, !variant.isEmpty {
-        cache(experimentKey, variant: variant)
-        return variant
+        let payload = json["payload"] as? [String: Any] ?? [:]
+        cache(experimentKey, variant: variant, payload: payload)
+        return SpinosisAssignment(variant: variant, payload: payload)
       }
     } catch {
-      if let cached = cachedVariant(experimentKey) {
+      if let cached = cachedAssignment(experimentKey) {
         return cached
       }
-      return fallback
+      return fallbackAssignment
     }
 
-    return cachedVariant(experimentKey) ?? fallback
+    return cachedAssignment(experimentKey) ?? fallbackAssignment
   }
 
   func track(_ eventName: String, properties: [String: Any]?) async {
@@ -164,17 +199,27 @@ actor SpinosisClient {
     return body
   }
 
-  private func cachedVariant(_ experimentKey: String) -> String? {
+  private func cachedAssignment(_ experimentKey: String) -> SpinosisAssignment? {
     guard let cached = assignments[experimentKey] else { return nil }
     if Date().timeIntervalSince1970 - cached.cachedAt > 60 * 60 * 24 {
       return nil
     }
-    return cached.variant
+    var payload: [String: Any] = [:]
+    if let data = cached.payloadJSON,
+       let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+      payload = parsed
+    }
+    return SpinosisAssignment(variant: cached.variant, payload: payload)
   }
 
-  private func cache(_ experimentKey: String, variant: String) {
+  private func cache(_ experimentKey: String, variant: String, payload: [String: Any]) {
+    let payloadJSON: Data? = nil
+    if JSONSerialization.isValidJSONObject(payload) {
+      payloadJSON = try? JSONSerialization.data(withJSONObject: payload)
+    }
     assignments[experimentKey] = CachedAssignment(
       variant: variant,
+      payloadJSON: payloadJSON,
       cachedAt: Date().timeIntervalSince1970
     )
     if let data = try? JSONEncoder().encode(assignments) {
