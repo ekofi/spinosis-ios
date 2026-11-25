@@ -192,8 +192,24 @@ actor SpinosisClient {
     }
   }
 
+  /// Read from the device on every call. Sent as defaults; values set by the app win.
+  private func deviceProperties() -> [String: Any] {
+    var props: [String: Any] = ["platform": "ios"]
+    let region: String?
+    if #available(iOS 16, macOS 13, *) {
+      region = Locale.current.region?.identifier
+    } else {
+      region = Locale.current.regionCode
+    }
+    if let region, region.count == 2 {
+      props["country"] = region.uppercased()
+    }
+    return props
+  }
+
   private func identityPayload() -> [String: Any] {
-    var body: [String: Any] = ["properties": properties]
+    let merged = deviceProperties().merging(properties) { _, appValue in appValue }
+    var body: [String: Any] = ["properties": merged]
     if let userId { body["userId"] = userId }
     if let anonymousId { body["anonymousId"] = anonymousId }
     return body
@@ -213,7 +229,7 @@ actor SpinosisClient {
   }
 
   private func cache(_ experimentKey: String, variant: String, payload: [String: Any]) {
-    let payloadJSON: Data? = nil
+    var payloadJSON: Data? = nil
     if JSONSerialization.isValidJSONObject(payload) {
       payloadJSON = try? JSONSerialization.data(withJSONObject: payload)
     }
